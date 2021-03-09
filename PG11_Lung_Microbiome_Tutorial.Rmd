@@ -1,0 +1,1075 @@
+---
+title: 'PG11: Lung Microbiome Analysis Tutorial'
+author: "Christopher A. Brown"
+date: "March 9, 2021 (updated)"
+output:
+  html_document:
+    code_folding: show
+    df_print: paged
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+---
+This report was built with R version `r getRversion()`. 
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# I. Introduction
+Welcome to the coding portion of the hands-on introduction to studying the lung microbiome. In this tutorial we'll see how we can use R to perform data manipulation, modeling, visualization, and reporting as part of our analysis workflow. If you have not already done so, please download R, RStudio, and the necessary packages. See this [guide](https://github.com/cb-42/ATS2021_PG11) for more details.
+
+## 1.1 Why RStudio?
+There are many quality of life features that aid in making your time spent coding more efficient and reproducible. For example, many keyboard shortcuts exist in RStudio for common tasks. Navigate to Help > Keyboard Shortcuts Help, for a full list. There are many other useful features, but a full discussion of these is outside the scope of this presentation.  
+
+## 1.2 Why R Markdown?  
+  - Easily combine narrative, code, statistics, and visualizations in one document.  
+  - Reproducibility  
+  - Generate high quality reports in a variety of formats: pdf, html, slides. We'll walk through the creation of an html report.  
+
+## 1.3 Navigating RStudio & an R Markdown script  
+R Markdown documents consist of narrative of text such as this sentence and code chunks such as the section directly below. Code chunks are enclosed within two pairs of three backticks. For reference a backtick is denoted by: ``` ` ```.  
+
+```{r example_code_chunk}
+# This is an example of a comment within a code chunk.
+# The # symbol means that any text following it should not be treated as R code.
+# When R code is run in a code chunk the resulting output will be displayed inline - that is, within the document - just below the current code chunk.
+# The first line without a # symbol is actual R code, and it will be executed when this code chunk is run.
+# To execute an entire code chunk: left click the green arrow in upper right of this section:
+# Alternatively, left click on the following line with R code, then use: cmd + enter (mac), ctrl + enter (pc). This will run a single line rather than the entire chunk.
+paste("Welcome to ATS 2021, PG11: A Hands-On Introduction to Studying the Lung Microbiome")
+```
+
+## 1.4 Brief notes on R code syntax, best practices  
+These following suggested practices will aid you as you begin writing your own code. We'll also demonstrate these throughout the tutorial.  
+
+  - Include comments explaining what your code does. The primary beneficiary will likely be your future self!  
+  - Use `?function_name`, such as `?ggplot` to view the help documentation for a function or library.  
+  - Give your objects meaningful, formulaic names so you can recall or determine what is inside the object. This is not always easy when you create dozens or hundreds of variables.  
+  - Utilize the following syntax where appropriate: `package_name::function_name()`  
+      - The main reason to do this is to avoid calling the wrong function of the same name, as we'll see with `dplyr::select()`. It also informs users which library a function is from. 
+  - Become familiar with and make use of the pipe operator: `%>%`. This can drastically improve the efficiency of your time spent coding, and is a natural fit for data wrangling workflows.  We'll see several examples of this in action.  
+  
+# II. Data Acquisition & Preparation  
+We will be using 16S data resulting from mothur processing and metadata that was previously generated. All of this data is available [here](https://github.com/dicksonlunglab/mouse_lung_microbiome_variability/tree/master/mouse_lung_microbiome_heterogeneity).
+
+## 2.1 Library Load  
+Before we begin bringing in the data to begin our analysis, we need to load the libraries that we'll use. Libraries contain additional code (primarily in the form of functions) and/or data that extend R's base functionality. A good practice is to keep a code chunk near the top of your script that contains all the libraries that are utilized in the analysis, so it's easy to keep track of all of the dependencies that your code has.  
+
+```{r libraries, message=FALSE}
+# This section contains typical libraries used in these analyses
+
+# I. universal data wrangling and visualization
+library(tidyverse)      # ggplot, dplyr, purrr, forcats, stringr... and other packages. See https://tidyverse.tidyverse.org/
+
+# II. machine learning & analysis packages
+library(vegan)          # decostand(), metaMDS(), scores(), rda(), ordispider(), adonis()
+# library(mvabund)        # mvabund(), manyglm() # This line can be uncommented when using mvabund as part of the 16S analysis.
+library(randomForest)   # randomForest()
+
+# III. formatting, plotting
+library(scales)         # used in formatting relative abundance % labels; unit_format()
+library(RColorBrewer)   # brewer.pal() for generating custom palettes
+library(knitr)          # kable(), for displaying nicer tables in html/pdf output
+```
+
+## 2.2 16S Data  
+Next we'll bring in the 16S data from two mothur files which have the raw counts and taxonomy information.  
+
+```{r load_16S_rawdata}
+# For ease of use, place the processed 16S data files of interest into the same directory as your current RStudio project
+# Best practices: 1) keep a separate project for each experiment or combination of experiments
+# 2) include a data folder within the project's directory to keep source files organized; also somewhat mitigates the risk of modifying them inadvertently
+
+# I. Read in .shared (counts of sequences assigned to OTU #s)
+# Includes basic processing with selection of OTUs > 0.1 % of the population
+otu_raw <- read.table("data/Heterogeneity.shared.txt", row.names = 2, header = TRUE, stringsAsFactors = FALSE) # read in the data, treating the first row as column names
+otu_trim <- otu_raw[, -c(1:2)] # drop the first 2 columns
+otu_trim <- as.matrix(otu_trim)
+otu_tmp <- vegan::decostand(otu_trim, "total") * 100 # standardization
+otu_trim[which(otu_tmp < 0.1)] <- 0 
+otu_good <- otu_trim[, which(colSums(otu_trim) > 0)] # keep only the OTUs which were present after setting quantities under 0.1 to 0
+
+# Trim _S from end of rownames(otu_good); note that it may be useful to keep these well identifiers in some analyses
+# Also clean up extra underscores and Xs from rownames
+rownames(otu_good) <- str_remove(rownames(otu_good), "_S\\d+") %>%
+  str_replace_all(pattern = "[_X]+", replacement="_") %>%
+  str_remove(pattern="_$")
+
+
+# It's a good idea to inspect the data regularly with tools such as dim(), str(), head(), tail(), summary()... This will help in catching errors earlier
+dim(otu_good) # dim(otu_good)[1] observations (samples) x dim(otu_good)[2] features (OTUs above .1% population threshold)
+otu_good[1:20, 1:10] # Examine first 20 rows, 10 columns. Try using other means for getting a glimpse of the data, such as str(otu_good).
+
+
+# II. Read in cons.taxonomy (for each OTU: contains taxonomic identifiers down to Genus level, if possible)
+# Note that OTUs are in rows here rather than columns
+# 2 imports are required due to the combination of 2 different separators  
+tax1 <- read.table("data/Heterogeneity.0.03.cons.taxonomy.txt", sep = "\t", row.names = 1, header = TRUE, colClasses = c("character", "numeric", "character"))
+tax2 <- read.table("data/Heterogeneity.0.03.cons.taxonomy.txt", sep = ";", skip = 1, col.names = c("", "Phylum", "Class", "Order", "Family", "Genus", ""), stringsAsFactors = FALSE) %>% 
+  dplyr::select(-c(1, 7)) %>% # drop columns 1 and 7
+  purrr::map_df(stringr::str_replace, "\\(.*.\\)", "") %>% # this essentially trims (100) and the like
+  purrr::map_df(as.factor) # turns all present columns into factor type variables
+otu_taxonomy <- data.frame(OTU = rownames(tax1), Size = tax1[, 1], tax2, stringsAsFactors = FALSE) # combine the first and second import
+rownames(otu_taxonomy) <- rownames(tax1)
+
+# trim otu_taxonomy based on OTUs in otu_good
+otu_good_taxonomy <- otu_taxonomy[otu_taxonomy$OTU %in% colnames(otu_good), ] %>%
+  droplevels() # Remove factor levels that have no values remaining due to removal
+rownames(otu_good_taxonomy) <- intersect(rownames(otu_taxonomy), colnames(otu_good))
+# otu_good_taxonomy <- as.data.frame(otu_good_taxonomy)   redundant in this case
+
+dim(otu_good_taxonomy) # Displays number of rows and columns
+otu_good_taxonomy # Examine the taxonomy dataframe. The first 10 OTUs coincide with the glimpse we took of otu_good. We're leveraging the df_print: paged option to be able to look through the dataframe in an html output.
+```
+
+## 2.3 Metadata  
+In order to aid in dividing our samples into groupings, we'll also need metadata or environmental data. Here we illustrate how that can be done.  
+
+```{r metadata_wrangling}
+# In this section, we'll load in metadata/environmental data, and/or create it
+
+## Load approach using metadata from github repo
+meta_df <- read.table("data/Heterogeneity.metadata.txt", sep = "\t", header = TRUE, stringsAsFactors = TRUE,
+                       colClasses = c("specimen" = "character")) 
+# Note that this will create factors out of all text (string) columns, except for specimen which we enforced as character type.
+# Factors are useful for 'reagent_tissue', 'litter', 'vendor', 'mouse', 'tissue_type', and 'cage' variables.
+otu_df <- data.frame(meta_df, decostand(otu_good, "total") * 100, stringsAsFactors = FALSE)
+
+# Examples of metadata creation using regular expressions (regex) in a tidyverse pipeline
+# Note that extracting metadata from sample names is much easier if naming conventions are consistent in terms of spelling and placement
+# otu_df <- data.frame(decostand(otu_good, "total") * 100, Sample_name = row.names(otu_good), stringsAsFactors = FALSE) %>%
+#   # Create Specimen_ctrl from first string of characters prior to first "_"
+#   mutate(Specimen_ctrl = factor(case_when(str_detect(Sample_name, "^AE_") ~ "AE",
+#                                        str_detect(Sample_name, "^Blank\\d_") ~ "Empty",
+#                                        str_detect(Sample_name, "^Heparin_") ~ "Heparin",
+#                                        str_detect(Sample_name, "^HomogCtrl_") ~ "HomogCtrl",
+#                                        str_detect(Sample_name, "^IsoCtrl_") ~ "IsoCtrl",
+#                                        str_detect(Sample_name, "^LPS_") ~ "LPS",
+#                                        str_detect(Sample_name, "^PerfusionPBS_") ~ "PBS",
+#                                        str_detect(Sample_name, "^WATERD|^waterC") ~ "WaterNeg",
+#                                        str_detect(Sample_name, "^mock[CD]") ~ "Mock",
+#                                        str_detect(Sample_name, "^[:alnum:]+") ~ str_extract(Sample_name, "^[:alnum:]+")), # for experimental groups, place after other steps because this regex would fill in values for controls (may or may not be ideal)
+#                                 levels = c("CR1", "CR2", "JAX1", "JAX2", "AE", "Empty", "Heparin", "HomogCtrl", "IsoCtrl", "LPS", "PBS", "WaterNeg", "Mock")
+#                 )
+#          ) %>%
+#   # Create Organ
+#   mutate(Organ = factor(case_when(str_detect(Sample_name, "_CECUM_") ~ "Cecum",
+#                                   str_detect(Sample_name, "_LUNG_HOMOG") ~ "Lung",
+#                                   str_detect(Sample_name, "_NASAL_") ~ "Nasal",
+#                                   str_detect(Sample_name, "_TONGUE_") ~ "Tongue"),
+#                         levels = c("Nasal", "Tongue", "Lung", "Cecum")
+#                 ) # sum(is.na(otu_df$Organ)) returns 32 (as expected, controls have NA in this column)
+#          ) %>%
+#   # Create Mouse
+#   mutate(Mouse = as.numeric(str_extract(Sample_name, "(?<=(CR\\d|JAX\\d)_)\\d+") # numbers correspond to mice if a CR or JAX specimen
+#               ) # sum(is.na(otu_df$Mouse)) returns 32 (as expected, the controls have NA in this column)
+#          ) %>%
+#   # metadata columns at front, followed by all of the count data
+#   dplyr::select(Sample_name:Mouse, everything())
+#   # note that the data is in wide format
+#   
+# otu_df$Specimen_ctrl %>% table() %>% sum() # 192: all samples/rows are accounted for
+# otu_df$Organ %>% summary() %>% sum() # ditto; 32 NAs for organs
+```
+
+Here is a glimpse of the metadata, done by randomly sampling 10 rows:  
+
+```{r view_meta}
+# The following lines of code randomly sample and display 10 rows from the metadata dataframe
+set.seed(2358)
+kable(dplyr::sample_n(meta_df, 10), caption = "Metadata, 10 randomly sampled rows", align = "l")
+```
+
+## 2.4 Color Palette Preparation  
+We'll also create a custom color palette for use in some of our visualizations. Although we might not realize we need this until later in the analysis, it makes sense to include elements like this in the preparation part of your analysis. Apart from the organizational benefit, code that relies on the palette won't run if the palette hasn't been defined - so it is best to define the palette before creating any visualizations.  
+
+```{r pal_prep}
+# for PCA ordinations; choose an 9 that covers the maximum number of factor levels (conditions) within a variable of interest
+pcapal <- brewer.pal(9,"Set1")
+```
+
+# III. Absolute Abundance  
+It's important to quantify the total bacterial load, typically done as one of the first steps in our analysis.   
+
+## 3.1  ddPCR  
+We'll show an example using ddPCR, but first we need to load the data.  
+
+```{r abs_abundance_prep}
+# The readxl library is installed along with tidyverse, but is not loaded with library(tidyverse). We can however access the read_xlsx function without loading readxl as shown below.
+spec_abs <- readxl::read_xlsx("data/16S_EvaGreen__Heterogeneity1_Data.xlsx", sheet = 2) %>%
+  dplyr::select(Sample_name = `Sample Name`, DNA_copies_per_ul = `Copies/ul DNA`) %>% # Rename the two columns of interest, and retain only these columns
+  dplyr::filter(str_detect(Sample_name, "LUNG")) # Keep only the lung tissue samples
+
+ctrl_abs <- readxl::read_xlsx("data/16S_EvaGreen__Heterogeneity1Ctrls_030618.xlsx", sheet = 2) %>% 
+  dplyr::select(Sample_name = `Sample Name`, DNA_copies_per_ul = `Copies/ul Sample`) %>% # Rename the two columns of interest, and retain only these columns
+  drop_na() %>% # drop rows with mising values
+  data.frame() # Avoid tibble indexing warning for next step (As of tibble 3.0.0)
+# Round up 0.57 DNA_copies to 1 (HomogCtrl_2)
+ctrl_abs[ctrl_abs[, "DNA_copies_per_ul"] < 1, "DNA_copies_per_ul"] <- 1
+
+abs_df <- full_join(spec_abs, ctrl_abs, by = c("Sample_name", "DNA_copies_per_ul")) %>% # We could also use bind_rows() or rbind() in this scenario since we renamed the columns to match. However, for more complex operations, it's safer to use a join function and specify the key columns.
+  mutate(Type = factor(case_when( # We need to create a factor containing the types of samples for creating separate bars in an upcoming visualization.
+    str_detect(Sample_name, "LUNG") ~ "Lung", # When the Sample_name contains LUNG, assign Lung as the value in the new Type column
+    TRUE ~ str_extract(Sample_name, "^[:alpha:]+") # Otherwise, determine a value based on the sequence of letters that occur at the start of the Sample_name
+  ), levels = c("AE", "HomogCtrl", "IsoCtrl", "NTC", "Lung"))) # Assign an appropriate order for the factor
+
+# We also need to compute the averages and error
+avg_abs_df <- abs_df %>%
+  group_by(Type) %>% # Before computing an average, identify what categories are being used to aggregate by. In this case, they're contained within the Type variable we just created.
+  summarize(mean_DNA_copies = mean(DNA_copies_per_ul), SEM = sqrt(var(DNA_copies_per_ul)/length(DNA_copies_per_ul)), .groups = "drop") # Create mean and SEM columns
+```
+
+Next, we'll examine this ddPCR data using a bar chart created with `ggplot`.  
+
+```{r abs_abundance_plot, fig.height = 8, fig.width = 12}
+# Create our bar chart using ggplot
+ggplot(avg_abs_df, aes(x = Type, y = mean_DNA_copies, fill = Type)) + # This brings in the dataframe and assigns columns to various plot elements
+  geom_col() + # The type of plot we want to construct. This is a wrapper for geom_bar(). See ?geom_bar for more details.
+  geom_errorbar(aes(ymin = mean_DNA_copies - SEM, ymax = mean_DNA_copies + SEM, width = 0.5)) + # An errorbar layer to be added to the bars
+  scale_y_log10(labels = trans_format("log10", math_format(10^.x))) + # We could convert to log10 scale prior to plotting, or we can do it on the fly
+  # geom_dotplot(data = abs_df, aes(y = DNA_copies_per_ul), binaxis = "y", dotsize = .6, stackdir = "center", stackratio = 1.5) +
+  geom_jitter(data = abs_df, aes(y = DNA_copies_per_ul), shape = 1, size = 2) + # This adds a bit of random noise for visibility of points; shape 1 is an unfilled circle
+  theme_bw() + # A minimalist theme
+  labs(x = "Control or Specimen Type", y = "log10 mean_DNA_copies per µL", title = "Absolute abundance of negative controls and lung specimens") + # Rename labels
+  annotation_logticks(sides = "l") # Control whether/where logticks appear
+```
+
+# IV. Comparing Community Composition  
+There are several tools we can use to compare the makeup of microbial communities.  
+
+## 4.1 Visualization techniques  
+In this subsection we will explore visualization methods including PCA ordinations, biplots, rank abundance plots (bar charts), and heat maps.  
+
+### 4.1.1 PCA Ordination  
+As a first step, we need to create a PCA model using only the data needed to make our comparison of interest.  
+
+#### 4.1.1.a Lung Tissue vs Negative Controls  
+It's important to compare the distribution of bacteria present in specimens and negative controls to gauge possible contamination.  
+
+```{r prep_pca_con_lung}
+# Filter data to retain controls and lung tissue only
+con_lung_df <- otu_df %>% # Note: this is just one of several possible approaches to filtering to retain the correct rows.
+  dplyr::filter((reagent_tissue == "Control") | (tissue_type == "Lung")) %>% # 65 specimens
+  droplevels() # Remove factor levels with no remaining observations. This prevents potential headaches in downstream data wrangling and visualizations.
+rownames(con_lung_df) <- con_lung_df$specimen 
+
+# PCA of all negative controls + lung tissue
+# Keep only the rows of interest for unstandardized data.
+pca_df <- otu_good[con_lung_df$specimen, ]
+otu_con_lung_hel <- decostand(pca_df, "hellinger") # Standardize use OTU columns only
+otu_con_lung_pca <- rda(otu_con_lung_hel)
+
+# summary() produces a list which is rather messy to print out all at once. Let's just examine the importance of the principal components by accessing $cont
+summary(otu_con_lung_pca)$cont # 0.1782 0.08601 0.06845 proportion explained by first 3 axes
+```
+
+Next, we see the corresponding ordination (a spider plot).  
+
+```{r spider_con_lung_final, fig.height=10, fig.width=10}
+# This approach combines base R plotting functionality and vegan's ordispider function, which creates the lines connecting points to the centroids.
+# Unlike with ggplot(), these lines must all be run at once in order to produce the desired result.
+plot(otu_con_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)", main = "PCA of Lung Tissue vs Controls, colored by Type", display = "sites")
+points(otu_con_lung_pca, pch = 19, col = pcapal[as.numeric(con_lung_df$reagent_tissue)]) # pch determines the point shape and col determines the colors to be used.
+ordispider(otu_con_lung_pca, con_lung_df$reagent_tissue, label = TRUE) # Draw lines from centroids to the points belonging to each group. 
+legend("topright", levels(con_lung_df$reagent_tissue), pch = 19, col = pcapal, title = "Type") # Format and add details to legends
+```
+
+Let's walk through how we arrived at this visualization, one line at a time. The `plot()` function creates axes based on the dimensions of the data. We also supply axis labels and a title.  
+
+```{r spider_con_lung1, fig.height=10, fig.width=10}
+plot(otu_con_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)", main = "PCA of Lung Tissue vs Controls, colored by Type", display = "sites")
+```
+
+Next we'll add the points with the `points()` function. Note that we're setting the point shape and color with the `pch` and `col` parameters, respectively. We also have to run both of these lines at the same time to get the result we're after.  
+
+```{r spider_con_lung2, fig.height=10, fig.width=10}
+# Unlike with ggplot(), these lines must all be run at once in order to produce the desired result.
+plot(otu_con_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)", main = "PCA of Lung Tissue vs Controls, colored by Type", display = "sites")
+points(otu_con_lung_pca, pch = 19, col = pcapal[as.numeric(con_lung_df$reagent_tissue)]) # pch determines the point shape and col determines the colors to be used.
+```
+
+We finish the main elements of a spider plot by drawing lines between the points and centroids, done with `ordispider()`. The second argument tells the function which variable we want to use for the centroids.  
+
+```{r spider_con_lung3, fig.height=10, fig.width=10}
+# Unlike with ggplot(), these lines must all be run at once in order to produce the desired result.
+plot(otu_con_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)", main = "PCA of Lung Tissue vs Controls, colored by Type", display = "sites")
+points(otu_con_lung_pca, pch = 19, col = pcapal[as.numeric(con_lung_df$reagent_tissue)]) # pch determines the point shape and col determines the colors to be used.
+ordispider(otu_con_lung_pca, con_lung_df$reagent_tissue, label = TRUE) # Draw lines from centroids to the points belonging to each group.
+```
+
+Lastly, we add a legend to arrive at the final figure.    
+
+```{r spider_con_lung4, fig.height=10, fig.width=10}
+# This approach combines base R plotting functionality and vegan's ordispider function, which creates the lines connecting points to the centroids.
+# Unlike with ggplot(), these lines must all be run at once in order to produce the desired result.
+plot(otu_con_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)", main = "PCA of Lung Tissue vs Controls, colored by Type", display = "sites")
+points(otu_con_lung_pca, pch = 19, col = pcapal[as.numeric(con_lung_df$reagent_tissue)]) # pch determines the point shape and col determines the colors to be used.
+ordispider(otu_con_lung_pca, con_lung_df$reagent_tissue, label = TRUE) # Draw lines from centroids to the points belonging to each group. 
+legend("topright", levels(con_lung_df$reagent_tissue), pch = 19, col = pcapal, title = "Type") # Format and add details to legends
+```
+
+`vegan` also supports additional ordinations such as ellipses. Simply adding an `ordiellipse` call with a color parameter (`col`) will give us the following plot. Although other plot customizations could be made, this is where we'll stop for the purposes of this example.
+
+```{r ellipse_con_lung, fig.height=10, fig.width=10}
+# This is very similar to the previous ordinaiton except that we're drawing ellipses rather than lines connecting the points to the centroids.
+plot(otu_con_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)", main = "PCA of Lung Tissue vs Controls, colored by Type", display = "sites")
+points(otu_con_lung_pca, pch = 19, col = pcapal[as.numeric(con_lung_df$reagent_tissue)]) # pch determines the point shape and col determines the colors to be used.
+ordispider(otu_con_lung_pca, con_lung_df$reagent_tissue, label = TRUE) # Draw lines from centroids to the points belonging to each group.
+ordiellipse(otu_con_lung_pca, con_lung_df$reagent_tissue, col = pcapal) # Draw ellipses around the centroids for each group.
+legend("topright", levels(con_lung_df$reagent_tissue), pch = 19, col = pcapal, title = "Type") # Format and add details to legends
+```
+
+#### 4.1.1.b Biplot  
+A biplot can help us understand which microbial features may be more associated with certain specimens or specimen groups.  
+
+```{r biplot_con_lung, fig.height=10, fig.width=10}
+# Consider whether rownames should be shown, if so they may need to be truncated for visibility
+
+# biplot(otu_con_lung_pca, type = "t") # This will result in a lot of warnings, and though it generates the plot it's not recommended
+
+# Address warnings with the following function, (hides warnings from 0-length arrows)
+# Alternatively, set warning = FALSE in the code chunk; does not seem to work on macs
+quiet_biplot <- quietly(function(ordiobj, ...) {
+  biplot(ordiobj, ...)
+})
+
+# Basic example: this can become difficult to read with many long specimen identifiers
+# biplot_results <- quiet_biplot(otu_con_lung_pca, type = "t")
+
+# A better approach is to use points color coded by the classes of interest as an additional layer on top of the biplot arrows
+biplot_results <- quiet_biplot(otu_con_lung_pca, type = "t", font = 2, font.lab = 2, xlab = "PC1 (17.82% Explained)", ylab = "PC2 (8.60% Explained)",
+                               main = "Biplot: Lung Tissue vs Control samples, colored by Type", display = "species", xlim = c(-0.8, 0.62)) # Note, plot zoom for xlim/ylim may need to be adjusted due to changing the display parameter
+points(otu_con_lung_pca, pch = 19, col = pcapal[c(5,2)][as.numeric(con_lung_df$reagent_tissue)]) # color palette adjustd to conflict less with biplot arrows
+legend("topright", levels(con_lung_df$reagent_tissue), pch = 19, col = pcapal[c(5,2)], title = "Type") # adjust legend colpal to match points
+
+# Another example for replacing specimen labels with C or T
+ # biplot(prcomp(otu_con_lung_hel), xlabs=ifelse(str_detect(con_lung_df$reagent_tissue, "Control"), "C", "T")) # arrow.len = 0 will also remove warnings, at the cost of losing the arrowhead
+```
+
+#### 4.1.1.c Lung Tissue: Charles River vs Jackson Labs  
+In this experiment, we sought to compare murine specimens from Charles River and Jackson Labs.    
+
+```{r prep_pca_lung}
+# Filter data to retain lung tissue only
+otu_lung <- dplyr::filter(otu_df, tissue_type == "Lung") %>%
+  droplevels() # remove levels that are no longer present due to filtering
+rownames(otu_lung) <- otu_lung$specimen
+
+# PCA of lung tissue specimens
+# Keep only the rows of interest for unstandardized data.
+pca_df <- otu_good[otu_lung$specimen, ]
+otu_lung_hel <- decostand(pca_df, "hellinger") # Standardize use OTU columns only
+otu_lung_pca <- rda(otu_lung_hel)
+
+# summary() produces a list which is rather messy to print out all at once. Let's just examine the importance of the principal components by accessing $cont
+summary(otu_lung_pca)$cont # 0.1458 0.10677 0.06776 proportion explained by first 3 axes
+```
+
+```{r spider_lung, fig.height=10, fig.width=10}
+# This approach combines base R plotting functionality and vegan's ordispider function, which creates the lines connecting points to the centroids.
+# Unlike with ggplot(), these lines must all be run at once in order to produce the desired result.
+plot(otu_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (14.58% Explained)", ylab = "PC2 (10.68% Explained)", main = "PCA of Specimen Origin, colored by Vendor", display = "sites")
+points(otu_lung_pca, pch = 19, col = pcapal[as.numeric(otu_lung$vendor)]) # pch determines the point shape and col determines the colors to be used.
+ordispider(otu_lung_pca, otu_lung$vendor, label = TRUE) # Draw lines from centroids to the points belonging to each group.
+legend("topright", levels(otu_lung$vendor), pch = 19, col = pcapal, title = "Vendor") # Format and add details to legends
+```
+
+#### 4.1.1.d Biplot  
+Next, we'll examine another biplot.  
+
+```{r biplot_lung, fig.height=10, fig.width=10}
+# Consider whether rownames should be shown, if so they may need to be truncated for visibility
+
+# biplot(otu_lung_pca, type = "t") # This will result in a lot of warnings, and though it generates the plot it's not recommended
+
+# Address warnings with the following function, (hides warnings from 0-length arrows)
+# Alternatively, set warning = FALSE in the code chunk; does not seem to work on macs
+
+# see function that was created previously
+biplot_results <- quiet_biplot(otu_lung_pca, type = "t")
+
+# example for replacing specimen labels with CR or JL
+#  biplot(prcomp(otu_lung_hel), xlabs=ifelse(str_detect(lung_df$vendor, "Charles_River"), "CR", "JL")) # arrow.len = 0 will also remove warnings, at the cost of losing the arrowhead
+```
+
+### 4.1.2 Trees and heat maps  
+Next we'll examine two approaches to constructing heat maps, using lung specimens.    
+
+#### 4.1.2.a ggplot implementation  
+If you're comfortable with the ggplot approach to creating visualizations, you'll likely be able to more easily customize these plots to your liking.    
+
+```{r ggheatmap_prep}
+# Determine the order of OTUs based on means within Lung specimens
+otu_order <- names(sort(colMeans(otu_lung[, stringr::str_detect(colnames(otu_lung), "Otu")]), decreasing = TRUE))
+
+heat_df <- otu_lung %>% 
+  dplyr::select(specimen, log_IL1a, otu_order[1:20]) %>% # Select the top 20 OTUs
+  pivot_longer(cols = -c("specimen", "log_IL1a"), names_to = "OTU", values_to = "Percentage", # Pivots (longer) all columns expect those specified by -str_which()
+               names_ptypes = list(OTU = factor(levels = otu_order[1:20])))
+  # group_by(OTU) %>%
+  # summarize(Mean_perc = mean(Percentage), .groups = "drop") %>%
+```
+
+```{r ggheatmap, fig.height=8, fig.width=12}
+# Note that the OTU levels are sorted in reverse order of abundance here - we could adjust this if desired.
+ggplot(heat_df, aes(x = specimen, y = OTU)) +
+  geom_tile(aes(fill = Percentage)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.margin = unit(c(0.5,0.5,0.5,1),"cm")) + # Extra plot padding is necessary due to the rotation of x-axis labels.
+  scale_fill_gradient(low = "white", high = "dark blue") + # This allows us to specify the colors used within the heatmap
+  labs(title = "Relative abundance of top OTUs by Specimen", x = "Lung Tissue Specimen")
+```
+
+#### 4.1.2.b Base implementation & dendrogram  
+Next, we'll explore a different approach using base R functionality. This time we'll use dissimilarity data and contruct dendrograms to go with the plot.  
+
+```{r dendro_heatmap, fig.height=8, fig.width=12}
+# Unfortunately, filtering and other tidyverse functions strip rownames, and rownames are useful for pulling information out of matrices.
+# However, there is a function to easily put the specimen column back into rownames
+heat_df <- dplyr::filter(otu_df, tissue_type == "Lung") %>%
+  droplevels() %>% 
+  remove_rownames() %>%
+  column_to_rownames("specimen") %>% # This turns the specimen column into the rownames.
+  dplyr::select(otu_order[1:20]) # Keep only the top 20 OTUs.
+
+# Create Bray-Curtis matrix for lung specimens
+bc_lung_spec <- vegdist(dplyr::select(heat_df, otu_order[1:20]), method = "bray")
+# The linkage method to be used will depend on the nature of the data
+clust_lung_spec <- hclust(bc_lung_spec, method = "average")
+
+# Create Bray-Curtis matrix for OTUs
+bc_lung_otu <- vegdist(t(dplyr::select(heat_df, otu_order[1:20])), method = "bray")
+clust_lung_otu <- hclust(bc_lung_otu, method = "average")
+
+# Create the heatmap with dendrograms
+heatmap(as.matrix(dplyr::select(heat_df, str_which(colnames(heat_df), "Otu"))), Rowv = as.dendrogram(clust_lung_spec), Colv = as.dendrogram(clust_lung_otu), margins=c(5,0))
+```
+
+### 4.1.3 Rank Abundance  
+In the following series of examples, we'll use RA plots to compare the community composition in lung speciments against negative controls. Note that the strategies we'll use can be extended to conduct comparisons across any arbitrary groups, assuming metadata exists to identify the observations (rows) belonging to each group. For instance, we might compare four different types of tissue, or drill down into the controls and compare those subtypes.  
+
+#### 4.1.3.a Comparison of Negative Controls against Lung Tisssue specimens  
+
+```{r prep_ra}
+# First we need to prepare the data: negative controls and lung tissue specimens
+# Order the data by most abundant OTU in lung tissue specimens only
+# Include an errorbar
+# Color by phyla
+
+ra_df <- otu_df %>% # Note at this is just one of several possible approaches to filtering to retain the correct rows
+  dplyr::filter((reagent_tissue == "Control") | (tissue_type == "Lung")) %>% # 65 specimens
+  droplevels() # remove factor levels with no remaining observations - saves potential headaches in downstream wrangling and visualizations
+
+# Determine the order of OTUs based on means within Lung specimens
+otu_order <- names(sort(colMeans(dplyr::filter(ra_df, tissue_type == "Lung")[, str_detect(colnames(ra_df), "Otu")]), decreasing = TRUE))
+
+# Keep top 20 OTUs, then reshape the dataframe from wide to long format
+# g_df <- ra_df %>%
+#   dplyr::select(str_which(colnames(ra_df), "Otu", negate = TRUE), colnames(ra_df[, otu_order[1:20]])) %>% # Keep non-OTU columns, followed by the 20 most abundant OTU columns
+#   gather(key = OTU, value = Percentage, -str_which(colnames(ra_df), "Otu", negate = TRUE), factor_key = TRUE) %>% # factor_key is important because we care about the order (levels) in OTU
+#   droplevels()
+
+# Keep top 20 OTUs, then reshape the dataframe from wide to long format
+g_df <- ra_df %>%
+  dplyr::select(str_which(colnames(ra_df), "Otu", negate = TRUE), colnames(ra_df[, otu_order[1:20]])) %>% # Keep non-OTU columns, followed by the 20 most abundant OTU columns
+  pivot_longer(cols = -str_which(colnames(ra_df), "Otu", negate = TRUE), names_to = "OTU", values_to = "Percentage",
+               names_ptypes = list(OTU = factor(levels = otu_order[1:20]))) # Ensuring OTU column is a factor is important due to the ordering expected in RA plots
+
+# Join Phylum column from taxonomy table
+tax_df <- otu_good_taxonomy[otu_good_taxonomy[,"OTU"] %in% otu_order[1:20], c("OTU", "Phylum")] # Keep only the rows from ranked OTU vector, and OTU + whatever taxonomic level to use for filling bars
+tax_df$OTU <- factor(tax_df$OTU, levels = otu_order[1:20]) # set OTU factor levels to be in the same order as in g_df. If this is not done, our OTU column will be coerced to a character vector when we join (we'll lose the levels)
+g_df <- inner_join(g_df, tax_df, by = "OTU")
+
+# dimensions have gone from 65 745 to 1300 18
+
+# Generate mean and sem for each group
+agg_df <- g_df %>%
+  group_by(reagent_tissue, OTU, Phylum) %>%
+  summarize(Mean_perc = mean(Percentage), SEM = sqrt(var(Percentage)/length(Percentage)), .groups = "drop")
+```
+
+First we'll create a basic rank abundance plot, then it will be gradually built up in the following examples.  
+
+```{r plot_ra_basic, fig.height=6, fig.width=12}
+(p <- ggplot(agg_df, aes(x = OTU, y = Mean_perc, fill = reagent_tissue)) + # Utilize the data and map the variables to plot parameters.
+  geom_col() +
+  facet_grid(reagent_tissue ~ .)) # Faceting replicates the plot once for each category contained within specified variable(s).
+```
+
+Let's add an errorbar and improve the visual aesthetics.
+
+```{r plot_ra_improved, fig.height=6, fig.width=12}
+# Add an errorbar
+(q <- p + geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3)))
+
+# Clear background + modify theme (rotate x-axis labels, reposition legend)
+(q <- q + theme_bw() + # note that a theme_ layer added after other other theme modifications will remove these prior modifications
+    theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top"))
+```
+
+Adding Genus labels to Otu identifiers
+
+```{r plot_ra_otu_lab, fig.height=6, fig.width=12}
+# Add Genus levels to the OTU Number
+levels(agg_df$OTU) <- fct_inorder(paste0(otu_good_taxonomy[levels(agg_df$OTU), ]$Genus, " (", levels(agg_df$OTU), ")"))
+# equivalent to: # cbmbtools::paste_tax(levels(agg_df$OTU))
+
+ggplot(agg_df, aes(x = OTU, y = Mean_perc, fill = fct_rev(reagent_tissue))) + 
+  geom_col() +
+  facet_grid(fct_rev(reagent_tissue) ~ .) +
+  geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3)) + 
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm")) + 
+  scale_y_continuous(labels = unit_format(suffix = "%")) + 
+  labs(title="Comparison of Lung Tissue and Controls", subtitle = "Ranked by lung tissue specimens", y = "% Relative Abundance")
+```
+
+How do we adjust the legend and facet labels?
+
+```{r plot_ra_factor, fig.height=6, fig.width=12}
+# Although it is possible to adjust the values and labels within the ggplot workflow, perhaps the simplest approach would be to correct the reagent_tissue column values and factor levels prior to plotting
+agg_df$reagent_tissue <- fct_recode(agg_df$reagent_tissue, Lung = "Tissue") %>%
+  fct_relevel("Lung")
+
+ggplot(agg_df, aes(x = OTU, y = Mean_perc, fill = reagent_tissue)) + 
+  geom_col() + # use show.legend = FALSE to remove the legend entirely
+  facet_grid(reagent_tissue ~ .) +
+  geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3)) + 
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm"), legend.title = element_blank()) + 
+  scale_y_continuous(labels = unit_format(suffix = "%")) + 
+  labs(title="Comparison of Lung Tissue and Controls", subtitle = "Ranked by lung tissue specimens", y = "% Relative Abundance")
+  # for further customizing of the legend, try adding a guide_legend() layer
+```
+
+How can we use fill color to show the phyla to which each OTU belongs?
+
+```{r plot_ra_phy, fig.height=6, fig.width=12}
+# First we need to prepare the taxonomic data - In this case we did this earlier in our overall RA data prep.
+
+# Next, simply change the fill parameter to Phylum and rerun the ggplot code
+ggplot(agg_df, aes(x = OTU, y = Mean_perc, fill = Phylum)) + 
+  geom_col() + # use show.legend = FALSE to remove the legend entirely
+  facet_grid(reagent_tissue ~ .) +
+  geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3)) + 
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm"), legend.title = element_blank()) + 
+  scale_y_continuous(labels = unit_format(suffix = "%")) + 
+  labs(title="Comparison of Lung Tissue and Controls", subtitle = "Ranked by lung tissue specimens", y = "% Relative Abundance")
+
+# Encourage participants to run these by commenting out a layer, altering 1 parameter to develop a deeper understanding of how to build up or alter a ggplot object
+```
+
+#### 4.1.3.b Comparison of Lung Tisssue specimens by vendor  
+Next we'll create another relative abundance plot to examine lung tissue specimens by vendor.  
+
+```{r prep_ra_lung}
+# First we need to prepare the data: lung tissue
+# Order the data by most abundant OTUs within Charles River vendor
+# Include an errorbar
+# Color by phyla
+# Add Genus identifier to the OTU number where possible
+
+ra_df <- otu_df %>% # Note at this is just one of several possible approaches to filtering to retain the correct rows
+  dplyr::filter(tissue_type == "Lung") %>% # 40 specimens
+  droplevels() # remove factor levels with no remaining observations - saves potential headaches in downstream wrangling and visualizations
+
+# Determine the order of OTUs based on means within Lung specimens from Charles River
+otu_order <- names(sort(colMeans(dplyr::filter(ra_df, vendor == "Charles_River")[, str_detect(colnames(ra_df), "Otu")]), decreasing = TRUE))
+
+# Keep top 20 OTUs, then reshape the dataframe from wide to long format
+g_df <- ra_df %>%
+  dplyr::select(str_which(colnames(ra_df), "Otu", negate = TRUE), colnames(ra_df[, otu_order[1:20]])) %>% # Keep non-OTU columns, followed by the 20 most abundant OTU columns
+  pivot_longer(cols = -str_which(colnames(ra_df), "Otu", negate = TRUE), names_to = "OTU", values_to = "Percentage",
+               names_ptypes = list(OTU = factor(levels = otu_order[1:20]))) # Ensuring OTU column is a factor is important due to the ordering expected in RA plots
+  
+# Join Phylum column from taxonomy table
+tax_df <- otu_good_taxonomy[otu_good_taxonomy[,"OTU"] %in% otu_order[1:20], c("OTU", "Phylum")] # Keep only the rows from ranked OTU vector, and OTU + whatever taxonomic level to use for filling bars
+tax_df$OTU <- factor(tax_df$OTU, levels = otu_order[1:20]) # set OTU factor levels to be in the same order as in g_df. If this is not done, our OTU column will be coerced to a character vector when we join (we'll lose the levels)
+g_df <- inner_join(g_df, tax_df, by = "OTU")
+
+# dimensions have gone from 40 745 to 1300 18
+
+# Generate mean and sem for each group
+agg_df <- g_df %>%
+  group_by(vendor, OTU, Phylum) %>%
+  summarize(Mean_perc = mean(Percentage), SEM = sqrt(var(Percentage)/length(Percentage)), .groups = "drop")
+
+# Add Genus levels to the OTU Number
+levels(agg_df$OTU) <- fct_inorder(paste0(otu_good_taxonomy[levels(agg_df$OTU), ]$Genus, " (", levels(agg_df$OTU), ")"))
+```
+
+This time, we'll create the final RA plot in one pass.  
+
+```{r plot_ra_lung, fig.height=8, fig.width=12}
+(ra_vend_plot <- ggplot(agg_df, aes(x = OTU, y = Mean_perc, fill = Phylum)) + 
+  geom_col() + # use show.legend = FALSE to remove the legend entirely
+  facet_grid(vendor ~ .) +
+  geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3)) + 
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm"), legend.title = element_blank()) + 
+  scale_y_continuous(labels = unit_format(suffix = "%")) + 
+  labs(title="Comparison of Lung Tissue across vendors", subtitle = "Ranked by Charles River lung tissue specimens", y = "% Relative Abundance"))
+```
+
+#### 4.1.3.c Stacked Bar examples  
+Stacked bars also us to view trends across samples, at the cost of potentially making it more difficult to clearly measure differences in OTUs. There are several strategies to consider when creating such a visualization. Sometimes, when there are many OTUS within a taxonomic level, it may be of interest to combine levels or combine groups of related OTUs to avoid hundreds of very small lines on the resulting bars. This improves the overall visual clarity, but there should be a compelling reason for performing the grouping operation. Additionally, just as in the Rank Abundance visualizations we've already seen, how categories (OTUs or otherwise) are ordered is an important component in clearly presenting one's results.  
+
+A basic example that requires no additional processing, can be constructed using Phylum, given that `g_df` already has this column thanks to our prior data preparation. The following visualization allows us to see broad trends and outliers in the relative abundance of various phyla across the samples.  
+
+```{r stacked_bar_phy, fig.height=8, fig.width=12}
+# Stacked bar example (Phyla) by Mouse
+ggplot(g_df, aes(x = mouse, y = Percentage, fill = Phylum)) +
+  geom_bar(position = "fill", stat = "identity") +
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm"), legend.title = element_blank()) +
+  labs(title="Comparison of Lung Tissue across vendors", subtitle = "Ranked by Charles River lung tissue specimens, fill by Phyla", y = "Relative Abundance")
+```
+
+What would happen if we used the OTU column to fill corresponding portions of the bars? Note that because we've excluded all but the top 20 OTUs, the `position` parameter needs to changed from what was used in the Phyla visualization. Without changing this, the implication is that these 20 OTUs show 100% of the data (which is not true).  
+
+```{r stacked_bar_otu, fig.height=8, fig.width=12}
+# Stacked bar example (OTU) by Mouse
+ggplot(g_df, aes(x = mouse, y = Percentage, fill = OTU)) +
+  geom_bar(position = "stack", stat = "identity") + # Note parameter adjustment
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm"), legend.title = element_blank()) +
+  scale_y_continuous(labels = unit_format(suffix = "%")) +
+  labs(title="Comparison of Lung Tissue across vendors", subtitle = "Ranked by Charles River lung tissue specimens, fill by top 20 OTUs", y = "% Relative Abundance")
+```
+
+Suppose we didn't care for the white space, which represents the abundance of OTUs outside the top 20. All of the OTU data could be shown instead. In this case, careful consideration needs to be given for how to effectively represent the results. It's clear that showing hundreds or thousands of OTUs in a single bar is not practical, and may also distract from other signals. Additionally, including hundreds of OTUs in a legend creates an plot that becomes difficult to examine (expanding the `fig.height` and `fig.width` parameters in the respective code chunk label can help). Most likely, many of the OTUs will need to be collapsed into an 'Other' category, or into related groups. The next code chunk contains an example of this, along with additional visual aesthetic modifications.  
+
+```{r stacked_bar_otu_redux, fig.height=12, fig.width=12}
+# reprocess the data to retain all OTUs by keeping the entire otu_order vector
+g_df_redux <- ra_df %>%
+  dplyr::select(str_which(colnames(ra_df), "Otu", negate = TRUE), colnames(ra_df[, otu_order])) %>% # Keep non-OTU columns, followed by the OTUs in order of abundance
+  pivot_longer(cols = -str_which(colnames(ra_df), "Otu", negate = TRUE), names_to = "OTU", values_to = "Percentage",
+               names_ptypes = list(OTU = factor(levels = otu_order))) # Ensure OTU column is a factor is important due to the ordering expected in RA plots
+
+g_df_redux$OTU <- g_df_redux$OTU %>%
+  fct_relabel(~ case_when(.x %in% otu_order[1:20] ~ .x, # Retain the top 20 as independent levels
+                          TRUE ~ "Other"), levels = c(otu_order[1:20], "Other")) # Any OTU besides the top 20 becomes 'Other'
+
+# Sort the data by the factor used for fill to obtain desired appearance. This can take some experimentation.
+g_df_redux <- g_df_redux %>%
+  arrange(OTU)
+
+# Stacked bar example (OTU) by Mouse
+ggplot(g_df_redux, aes(x = mouse, y = Percentage, fill = fct_rev(OTU))) +
+  geom_bar(position = "stack", stat = "identity") +
+  theme_bw() +
+  theme(panel.grid = element_blank(), axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "top", plot.margin = unit(c(0.5,0.5,0.5,1),"cm"), legend.title = element_blank()) +
+  scale_y_continuous(labels = unit_format(suffix = "%")) +
+  labs(title="Comparison of Lung Tissue across vendors", subtitle = "Ranked by Charles River lung tissue specimens, fill by OTU", y = "% Relative Abundance") +
+  scale_fill_manual(values = c("#A0A0A0", hue_pal()(20))) # Former is hexcode for a grey shade
+```
+
+## 4.2 Hypothesis testing  
+Next we'll explore how to conduct significance testing.  
+
+### 4.2.1 PERMANOVA (adonis)  
+The following is an example of a permanova implementation using vegan::adonis().  
+
+```{r adonis}
+# Permanova
+set.seed(8947) # setting a seed allows for reproducibility. Both of these lines need to be run together for it to work.
+adonis(otu_lung_hel~otu_lung$vendor, method="euclidean", permutations = 10000) # 9.999e-05 ***
+# The left hand side of the formula is the transformed data, and the right hand side is a vector (column) container the group identifiers of interest.
+```
+
+### 4.2.2 mvabund  
+Because this may take some time to finish (about 4.5 minutes on a powerful machine), the following code is commented out to prevent it slowing down the creation of our report, which we'll get to later on. To run this section at a future point that's convenient for you, begin by simply highlighting all of the lines in the code chunk and then using CTRL + Shift + C to uncomment the code (mac). The code responsible for loading mvabund in section 2.1 will also need to be uncommented. [additional explanation, topics here]. For code chunks that take a while to execute, whether due to statistical analyses or visualizations, it may be beneficial to set the code chunk cache parameter to TRUE. This will enable you to recreate your report much more quickly when making small changes elsewhere.
+
+```{r mvabund, cache=TRUE}
+# a <- Sys.time() # Sometimes this can take a while, so it might be useful to keep track of the time with start/stop points to allow us to compute the duration.
+# otu_mva <- mvabund(otu_lung[,str_which(colnames(otu_lung), "Otu")]) # select only lung specimens and Otu columns
+# otu_ven_many <- manyglm(otu_mva ~ otu_lung$vendor)
+# otu_mva_results <- anova(otu_ven_many, p.uni="adjusted")
+# b <- Sys.time()
+# b - a
+# 
+# plot(otu_ven_many) # Residual plot
+# otu_mva_results$table # Signif
+# 
+# # Example output
+# # Analysis of Deviance Table
+# #
+# # Model: manyglm(formula = otu_mva ~ otu_lung$vendor)
+# #
+# # Multivariate test:
+# #                 Res.Df Df.diff   Dev Pr(>Dev)
+# # (Intercept)         39
+# # otu_lung$vendor     38       1 797.9    0.001 ***
+# # ---
+# # Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+```
+
+### 4.2.3 constrained ordination  
+The following is a `Cage` example using `vegan::cca()`. For more examples of CCA and other ordination techniques, check out the [Intro to Vegan](https://cran.r-project.org/web/packages/vegan/vignettes/intro-vegan.pdf).  
+
+```{r constrained}
+# Run anova on our hellinger transformed data. We'll also need to pass in one or more vectors of metadata corresponding to the constraining variables.
+lung_meta <- dplyr::filter(otu_df, specimen %in% rownames(otu_lung)) %>%
+  dplyr::select(-str_which(colnames(otu_df), "Otu"))
+cage_cca <- cca(otu_lung_hel ~ lung_meta$cage) # First create the cca model object
+anova(cage_cca) # Analyze the model
+```
+
+# V. Relative Abundance of Key Community Members  
+[Descriptive text here]  
+
+## 5.1 Identifying enriched taxonomic groups  
+
+### 5.1.1 mvabund  
+While we could make use of our previous mvabund results and examine whether there are any significant taxa, for time considerations we'll show only the code to do so.  
+
+```{r mva_pvals}
+# # The following lines could be run with an mvabund model
+# # Restructure, sort, filter to retrieve significant OTUs
+# otu_ven_sigpvals <- data.frame(OTU = colnames(otu_mva_results$uni.p), uni_p = otu_mva_results$uni.p[2,]) %>%
+#   dplyr::filter(uni_p <= .05) %>% # The threshold here can be adjusted to the desired level.
+#   droplevels() %>%
+#   arrange(uni_p) # Orders the pvalues
+# 
+# # label OTUS
+# otu_ven_sigpvals$OTU <- fct_inorder(paste0(otu_good_taxonomy[levels(otu_ven_sigpvals$OTU), ]$Genus, " (", levels(otu_ven_sigpvals$OTU), ")"))
+```
+
+Here is an example of formatting a dataframe (in this case containing pvalues) for display in a report.  
+
+```{r kable_mva_pvals, fig.height = 8, fig.width = 8}
+# Note that this is an example constructed for illustration purposes only
+mva_sigpvals <- data.frame(Family = c("Lachnospiraceae", "Erysipelotrichaceae", "Porphyromonadaceae", "Clostridiaceae_1", "Streptococcaceae", "Lactobacillaceae"), uni_p = c(0.001, 0.003, 0.015, 0.016, 0.017, 0.017))
+knitr::kable(mva_sigpvals, caption = "Vendors, Significant OTUs (.05)", align = "l") # Check out ?kable for further specifications.
+
+# # This example would use the output from previous code chunk rather than our arbitrary dataframe
+# knitr::kable(otu_ven_sigpvals, caption = "Vendors, Significant OTUs (.05)", align = "l")
+```
+
+### 5.1.2 Random forest (mean decrease in accuracy)  
+Note: this depends on whether we're using regression or classification. A generic variable importance plot is shown for one iteration of the model. For classification as shown below, we prefer to use MeanDecreaseAccuracy as our feature importance metric rather than MeanDecreaseGini, due to increased bias in the latter.  
+
+```{r family_prep}
+# Aggregate the OTU data into family. This requires a fair amount of data reshaping and joining operations. Wrapping these steps into a function is ideal so that you don't have to retrace every step for simply changing a taxonomic level for aggregation (e.g. Phylum vs Family).
+fam_df <- otu_df %>%
+  dplyr::select(specimen, contains("Otu")) %>% # Keep only the specimen identifier and OTU columns
+  tidyr::pivot_longer(cols = -stringr::str_which(colnames(.), "Otu", negate = TRUE), names_to = "OTU", values_to = "Percentage") %>% # Take data into long form in preparation for join operation
+  dplyr::inner_join(dplyr::select(otu_good_taxonomy, OTU, Family), by = "OTU") %>% # Determine which columns to join from taxonomy table. In this example, we're adding the Family column.
+  dplyr::group_by(specimen, Family) %>%
+  dplyr::summarize(Percentage = sum(Percentage), .groups = "drop") %>% # Note that this step removes any metadata columns which aren't grouped by
+  tidyr::spread(key = Family, value = Percentage) %>% # Return data from long form to wide
+  dplyr::inner_join(dplyr::select(otu_df, -contains("Otu")), by = "specimen") %>%
+  dplyr::select(specimen, reagent_tissue:IL1a, everything()) # Pull metadata coluns to the front, all Family columns follow afterwards
+```
+
+Next, we'll run a basic randomForest.  
+
+```{r randomForest, fig.height=8, fig.width=10, cache = TRUE}
+# For lung specimens, retain only vendor & OTU columns
+rf_df <- dplyr::filter(fam_df, tissue_type == "Lung") %>% 
+  dplyr::select(vendor, levels(otu_good_taxonomy$Family)) %>% 
+  droplevels()
+  
+a <- Sys.time()
+set.seed(3462)
+rf_vendors <- randomForest(vendor ~ ., data = rf_df, importance = TRUE) # Setting the importance parameter to TRUE allows us to obtain the variable importance info we're after.
+b <- Sys.time()
+b-a
+
+# Basic variable importance plot
+varImpPlot(rf_vendors, scale = FALSE)
+```
+
+In order to better gauge the robustness of these findings, let's run the random forest model 100 times (note: this took around 30 seconds on a somewhat powerful machine).
+
+```{r many_rf, cache = TRUE}
+a <- Sys.time()
+nforest <- 100
+set.seed(3462)
+rf_list <- vector("list", nforest) # Initialize a list to store the randomForests
+for (i in seq_along(1:nforest)) { # Loops nforest number of times, creating a model and saving it into the list each time.
+    rf_list[[i]] <- randomForest(vendor ~ ., data = rf_df, importance = TRUE) 
+}
+b <- Sys.time()
+b-a
+
+# Extract the feature importances
+fi_df <- purrr::map(rf_list, ~{.[["importance"]][, 3]}) %>%
+  unlist() %>%
+  data.frame(Feature = names(.), MeanDecreaseAccuracy = .)
+
+meas <- colnames(fi_df)[2] # "MeanDecreaseAccuracy"
+
+# Identify the top features
+top_feat <- fi_df %>% dplyr::group_by(Feature) %>%
+  summarize(`:=`(!!meas, mean(.data[[meas]])), .groups = "drop") %>%
+  arrange(desc(.data[[meas]])) %>% 
+  head(20) %>% # Top 20 features
+  droplevels()
+
+# Retain only the top features
+fi_df <- dplyr::filter(fi_df, Feature %in% top_feat$Feature) %>% 
+  droplevels()
+fi_df$Feature <- forcats::fct_reorder(fi_df$Feature, fi_df[, 2], .fun = mean, .desc = TRUE)
+```
+
+Next we'll create boxplots of the feature importance over the 100 random forest runs.
+
+```{r rf_feature_importance, fig.height=10, fig.width=8}
+ggplot(fi_df, aes(x = Feature, y = fi_df[, 2])) + 
+  geom_boxplot(outlier.alpha = 0.4) + 
+  theme_bw() + 
+  labs(y = meas, title = paste0("Feature Importance: vendor ~ Family microbiome"), subtitle = paste0("Model: rf_df \nRuns: ", length(rf_list), ", mtry: ", rf_list[[1]]$mtry)) + 
+  coord_flip() + # Flip the axes for improved readability
+  scale_x_discrete(limits = rev(levels(fi_df$Feature)))
+```
+
+# VI. Community Diversity
+In this section we'll explore several measures of community diversity and examine how they can be used within our analyses.  
+
+## 6.1 α-diversity: within specimens
+First, we'll look at the diversity within specimens. We are interested in measures of:  
+  * **Richness** - how many unique taxa are there within a specimen?  
+  * **Evenness** - how evenly distributed are the taxa?  
+  * **Dominance** - what is the relative abundance of the dominant (largest %) taxa?  
+
+To measure α-diversity, we'll compute the [Shannon diversity](https://en.wikipedia.org/wiki/Diversity_index) using the `diversity()` function, which calculates the shannon index by default. Then we'll select the observations of interest and compute summary statistics. The formula for deriving the Shannon index is shown below:  
+
+$$H' = -\sum_{i=1}^{R}p_{i} \ln p_{i}$$
+
+```{r alpha_div}
+# Create dataframe w/ Sample name, Shannon, Total Reads, Dominance on a per sample basis
+alpha_div_df <- bind_cols(specimen = otu_df$specimen,
+                          Shannon = diversity(otu_good), # Shannon diversity per specimen
+                          Total_Reads = pmap_dbl(data.frame(otu_good),  sum), # rowwise sum (by specimen)
+                          Dominance = pmap_dbl(dplyr::select(otu_df, contains("Otu")), max)) %>% # Dominance: max % of top OTU per specimen
+  # mutate(Dominance = round(Dominance, 3)) # %>% # optional rounding; pipe(s) will need to be connected
+  left_join(otu_df[,1:6], by = "specimen") # Join first 6 metadata columns, allows for easier filtering
+
+shan_lung <- alpha_div_df %>% 
+  dplyr::filter(tissue_type == "Lung") %>% # Retain only lung specimens for visualization
+  droplevels()
+
+# Create Shannon diversity summary statistics for bars/error bars  
+agg_shan_lung <- shan_lung %>%
+  group_by(vendor) %>%
+  summarize(Mean_Sh = mean(Shannon), SEM_Sh = sqrt(var(Shannon)/length(Shannon)), .groups = "drop") # Create summary statistics
+```
+
+To visualize the results, we'll plot the specimens' α-diversities and means using `ggplot()`.
+
+```{r alpha_vis, fig.height=6, fig.width=8}
+ggplot(agg_shan_lung, aes(x = vendor, y = Mean_Sh, fill = vendor)) + # This brings in the aggregated dataframe and assigns columns to various plot elements
+  geom_col(show.legend = FALSE) + # Add bars representing the mean of specimens' Shannon diversity by vendor
+  geom_jitter(data = shan_lung, aes(x = vendor, y = Shannon), width = .2, alpha = .5, show.legend = FALSE) + # Use specimen level data, map columns to scatterplot attributes
+  geom_errorbar(aes(ymin = Mean_Sh - SEM_Sh, ymax = Mean_Sh + SEM_Sh), alpha = .5) + # Add an errorbar layer
+  theme_bw() + # A minimalist theme
+  labs(y = "Shannon Diversity", title = "Shannon Diversity of Lung Specimens by Vendor") # Adjust axis label and title
+```
+
+We can also test the difference between the means of these groups for significance.
+
+```{r sig_shan_lung}
+# T-Test for the two vendors. This approach would also work if there were 3 or more groups.
+TukeyHSD(aov(shan_lung$Shannon ~ shan_lung$vendor))
+```
+
+Rarefaction curves can also be used to explore α-diversity. First, the data needs to be prepared.  
+
+```{r rarefy_prep, warning=FALSE, cache=TRUE}
+# Generate the rarefaction data, combine with metadata, transform for plotting, and aggregate
+rarefy_agg <- rarefy(dplyr::select(otu_raw, -label, -numOtus), sample = 1:1000) %>% # subsample for each number in 1:1000; an alternative is to set sample = to the integer length of primary interest, e.g. 1000
+  data.frame(row.names = rownames(otu_good)) %>% # Use cleaned up rownames from otu_good rather than messy names from otu_raw
+  rownames_to_column("specimen") %>%
+  pivot_longer(-specimen, names_to = "Sample_Seq_Num", names_prefix = "N", names_transform = list(Sample_Seq_Num = as.numeric), values_to = "Unique_Species") %>% # Transform data from long to wide format
+  left_join(dplyr::select(otu_df, specimen, reagent_tissue, vendor, tissue_type), by = "specimen") %>%  # Join reagent_tissue, vendor, and tissue_type columns
+  dplyr::filter((reagent_tissue == "Control") | (tissue_type == "Lung")) %>% # Keep only lung specimens and negative controls
+  group_by(vendor, Sample_Seq_Num) %>%
+  summarize(Mean_Species = mean(Unique_Species), SEM = sqrt(var(Unique_Species)/length(Unique_Species)), .groups = "drop") # Create summary statistics by vendor (negative controls are considered 'None')
+
+# write.table(rarefy_raw,file = "rarefy.txt") # Create intermediate table
+```
+
+To visualize the rarefaction curves, we'll use three `geom_line` layers as follows:
+
+```{r rare_plot, fig.height=6, fig.width=10}
+ggplot(rarefy_agg, aes(x = Sample_Seq_Num, y = Mean_Species, color = vendor)) +
+  geom_line(alpha = 0.5) + # Line for the mean
+  geom_line(aes(y = Mean_Species - SEM), linetype = "dashed") + # Lower standard error
+  geom_line(aes(y = Mean_Species + SEM), linetype = "dashed") + # Upper standard error
+  theme_bw() + 
+  theme(panel.grid = element_blank(), legend.position = "top", legend.title = element_blank()) + 
+  scale_color_hue(labels = c("Charles River", "Jackson Labs", "Negative Controls")) + # Fix legend labels
+  labs(x = "Number of Sequences Sampled", y = "Unique Species", title = "Rarefaction curves for lung specimens and negative controls")
+```
+
+Relative abundance plots can also be used here.
+
+## 6.2 𝛽-diversity: across specimens  
+Next we'll examine diversity across specimens.    
+
+Revisiting our PCA ordination of lung specimens by vendor:
+
+```{r betadiv, fig.height=10, fig.width=10}
+# This approach combines base R plotting functionality and vegan's ordispider function, which creates the lines connecting points to the centroids.
+# Unlike with ggplot(), these lines must all be run at once in order to produce the desired result.
+plot(otu_lung_pca, type = "n", font = 2, font.lab = 2, xlab = "PC1 (14.58% Explained)", ylab = "PC2 (10.68% Explained)", main = "PCA of Specimen Origin, colored by Vendor", display = "sites")
+points(otu_lung_pca, pch = 19, col = pcapal[as.numeric(otu_lung$vendor)]) # pch determines the point shape and col determines the colors to be used.
+ordispider(otu_lung_pca, otu_lung$vendor, label = TRUE) # Draw lines from centroids to the points belonging to each group.
+legend("topright", levels(otu_lung$vendor), pch = 19, col = pcapal, title = "Vendor") # Format and add details to legends
+```
+
+### Bray-Curtis
+
+[Bray-Curtis dissimilarity](https://en.wikipedia.org/wiki/Bray%E2%80%93Curtis_dissimilarity) is a statistic used to quantify the compositional dissimilarity between two different sites, based on counts at each site. A score of 1 represents complete dissimilarity between two specimens, meaning no OTUs are shared between the specimens, for example. On the other hand, a score of 0 signifies complete similarity. The following formula provides the index of dissimilarity, though we'll use `vegdist` to handle computation:
+
+$$BC_{IJ} = 1 - \frac{2C_{IJ}}{S_{i} + S_{J}}$$
+
+```{r bray-curtis}
+# This helper function will be used to disambiguate columns associated with paired BC comparisons
+# For example, the reagent_tissue for sample 1 could be different than sample 2, thus an identifier column 
+# might be necessary for each in order to filter the results as desired.
+bc_rename <- function(colname) {
+  if(str_detect(colname, ".x$")) { # For .x, simply remove the suffix
+    return(str_remove(colname, ".x$"))
+  } else if (str_detect(colname, ".y$")) {
+    return(str_replace(colname, ".y$", "_comparison")) # For .y, replace with _comparison suffix
+  } else { # Otherwise name does not need adjustment
+    return(colname)
+    }
+} 
+
+# Goal: Full BC matrix converted to a long dataframe of all possible specimen comparisons.
+# We could also add a step to filter for specimens of interest
+sub_df <- otu_df %>% # First, subset to keep rows of interest for the Bray-Curtis comparisons
+  dplyr::filter(reagent_tissue == "Tissue") %>% # Exclude controls
+  droplevels()
+
+bc_df <- sub_df %>%
+  dplyr::select(contains("Otu")) %>% # retain OTU columns only
+  vegdist(diag = TRUE, upper = TRUE) %>% # method = "bray" by default
+  as.matrix() %>%
+  as.data.frame(row.names = sub_df$specimen) %>%
+  setNames(sub_df$specimen) %>% # add column names
+  rownames_to_column("specimen") %>% # create specimen column from rownames
+  pivot_longer(cols = -specimen, names_to = "comparison", values_to = "BC") %>% # transform from wide to long
+  dplyr::filter(specimen != comparison) %>% # remove comparisons against the same specimen (the diagonal in the original distance matrix)
+  left_join(dplyr::select(otu_df, specimen:tissue_type, cage), by = "specimen") %>% # join cols for subsetting by specimen1
+  left_join(dplyr::select(otu_df, specimen:tissue_type, cage), by = c("comparison" = "specimen")) %>% # join cols for specimen2 (comparison)
+  rename_with(~ map_chr(., bc_rename)) # use the custom renaming function defined above
+
+# Here we'll subset to retain only the within vendor + tissue comparisons. We could also subset even further to group by `shipments` within vendors.
+bc_tissue_vend_df <- bc_df %>%
+  dplyr::filter(tissue_type == tissue_type_comparison, vendor == vendor_comparison) %>% # Comparisons of interest are within tissue + vendor groupings
+  droplevels() %>%
+  group_by(specimen, vendor, tissue_type) %>% # Carefully consider which variables to use for aggregation
+  summarize(Mean_BC = mean(BC), SEM_BC = sqrt(var(BC)/length(BC)), .groups = "drop")
+```
+
+```{r tissue_vendor_bc_viz,fig.height=8, fig.width=12}
+# Plot within vendor tissue-tissue BC comparisons
+ggplot(bc_tissue_vend_df, aes(x = vendor, y = Mean_BC, fill = vendor)) + 
+  geom_boxplot() + # alternatively, use a geom_col and an errorbar layer
+  geom_point(size=1, alpha=0.5, position = position_jitter(width = 0.175, seed = 8237)) + # add 'noisy' points for specimens (adjust width to improve visibility on discrete x-axis)
+  theme_bw() + # A minimalist theme
+  labs(y = "Mean Bray-Curtis", title = "Bray-Curtis Dissimilarity: Tissue samples by vendor") + # Adjust axis label and title
+  facet_grid(. ~ tissue_type) +
+  theme(panel.grid = element_blank(), legend.title = element_blank()) +
+  expand_limits(y = c(0,1)) # Start y-axis at 0
+```
+
+### Unifrac  
+Future example. [Descriptive text here]  
+
+# VII. Reporting  
+Usually it's not enough that you've generated statistics or created visualizations. You also need to be able to share these results. Fortunately, there are a variety of ways to do this.
+
+## 7.1 Exporting a dataframe  
+Here is an example of exporting `otu_lung` to a .csv file, which can then be opened in Excel or your spreadsheet editor of choice. Note that depending on your locale (whether , or ; is the expected separator), you may need to use `write.csv2()` to obtain the desired results. As an additional exercise, try changing the name of the dataframe or the name of the output file.  
+
+```{r csv_export}
+# This will save a new file called otu_lung.csv in the current working directory
+write_csv(otu_lung, "otu_lung.csv")
+```
+
+The following code chunk creates dataframes aggregated to various taxonomic levels and saves them as .csv files in the project directory. Bonus: instead of using the following loop to write these tables to files, they could be added to the global environment instead.  
+
+```{r multi_export}
+# Create prep dataframe to use at each stage of taxonomic aggregation
+taxa_prep_df <- otu_df %>%
+  mutate(specimen = fct_inorder(specimen)) %>% # necessary to make specimen a factor to prevent alphabetic reordering in group_by + summarize operation
+  dplyr::select(specimen, contains("Otu")) %>% # retains Specimen (or optionally adjust to Sample_name) and Otu cols
+  pivot_longer(cols = -stringr::str_which(colnames(.), "Otu", negate = TRUE), names_to = "OTU", values_to = "Percentage") # wide to long transformation
+  
+# Create dataframes aggregated at the specified taxonomic levels
+for(taxon in c("Phylum", "Class", "Order", "Family")) {
+  taxa_prep_df %>% # Contains results of otu_good after decostand
+    inner_join(dplyr::select(otu_good_taxonomy, OTU, all_of(taxon)), by = "OTU") %>% # join taxonomy table
+    group_by(specimen, .data[[{taxon}]]) %>% # prepare to aggregate at specified taxonomic level
+    summarize(Percentage = sum(Percentage), .groups = "drop") %>%
+    spread(key = taxon, value = Percentage) %>% # transform to wide
+    write_csv(paste0("CRJL_", tolower(taxon), "_table.csv")) # writes to .csv
+    # Note, above line can commented and line below uncommented to add these dataframes to the global env
+    # assign(x = paste0(substr(tolower(taxon), start = 1, stop = 3), "_df_ex"), pos = 1) # assigns values to df_names in curent environment (presumed to be global env)
+}
+```
+
+## 7.2 Saving a plot  
+Next, we'll save a plot. There are several methods for doing this and one approach utilizing `ggsave` is shown in the following code chunk.  
+
+Note that we will also have access to a folder (in this case: **PG11_Lung_Microbiome_Tutorial_files/figure-html/**) with all of the plot images used in rendering the final report after finishing step 7.3, so these images could be retrieved from this folder after the knitting process is completed. If your report generates many figures, this might be a good way to go.  
+
+Additionally, right clicking on an image displayed inline (within PG11_Lung_Microbiome_Tutorial.Rmd) will bring up an option to save the image.  
+
+Yet another way to save a plot is to first save a plot to an object, for instance **p**, then type **p** followed by return in the console. Finally, navigate to the plot tab in RStudio and click the export drop down to reveal several methods for exporting the visualization that was just created from running **p**.  
+
+```{r ggsave}
+# The optional `path` parameter can be added onto the filename, used to denote a different directory. Use ?ggsave to check out other parameters
+ggsave(filename = "vendor_relabund.pdf", plot = ra_vend_plot, width = 30, height = 30, units = "cm")
+```
+
+## 7.3 Generating a report: Knitting  
+If all goes well, we should also be able to create a report from the narrative and code contained within this R Markdown document that we've been working on. Click the Knit button (look for the blue ball of yarn) near the top of RStudio interface to generate the default report type, which is set to HTML for this document. An HTML document containing this report will be created in the current working directory and it will display as a popup window or in the RStudio Viewer pane. We can easily change the type of file that is created by altering the output type in the header at the top of this document.  
+
+Note that there will also be a figure-html folder containing all of the plots created through the code chunks in this document. For example, if the Rmd file (the one we're using) is called PG11_Lung_Microbiome_Tutorial, then the figures would be located in: PG11_Lung_Microbiome_Tutorial_files/figure-html.  
+
+## 7.4 Cage Challenge  
+Congratulations! You've made it to the end of this introduction to lung microbiome analyses. Now that you've seen the basics, demonstrated between specimens and controls as well as within lung specimens, can you create additional analyses using the `cage` variable? Feel free to explore explore this and examine other possible relationships in the data on your own.  
+
+# VIII. Additional Resources  
+Resources for learning more about various topics.  
+
+## 8.1 Processing & Analysis Software  
+Although we used mothur to process the 16S data prior to this analysis, alternatives include QIIME2 and DADA2. Beyond processing, each also provides varying support for exploration and analysis tasks during or post-processing.  
+
+[mothur](https://mothur.org/)  
+[QIIME2](https://qiime2.org/)  
+[DADA2](https://benjjneb.github.io/dada2/tutorial.html)
+
+## 8.2 R Resources & Tutorials  
+This section contains some guides and further reading about R and key libraries that facilitate your work.  
+
+[R for Data Science](https://r4ds.had.co.nz/)  
+[Big Book of R](https://www.bigbookofr.com/)  
+[RStudio Cheatsheets](https://rstudio.com/resources/cheatsheets/)  
+[R Markdown tutorial](https://rmarkdown.rstudio.com/lesson-1.html)  
+[R Markdown: The Definitive Guide](https://bookdown.org/yihui/rmarkdown/)  
+[tidyverse](https://www.tidyverse.org/packages/)  
+[Ggplot2](https://ggplot2.tidyverse.org/)  
+    - Includes several reference guides and learning sources  
+[Pivoting](https://tidyr.tidyverse.org/articles/pivot.html)  
+
+## 8.3 Version control  
+If you're new to git/github and version control in general, there are a variety of resources to help get you started:  
+
+git  
+[github tutorial](https://guides.github.com/activities/hello-world/)  
+
+## 8.4 cbmbtools/course material  
+[cbmbtools library](https://github.com/cb-42/cbmbtools)  
+    - This package contains functions for assisting in 16S microbiome analysis.  
+
+## 8.5 other  
+[Bioconductor](https://www.bioconductor.org/)  
