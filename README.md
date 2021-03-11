@@ -1,7 +1,7 @@
 
 <center>
 
-![ATS2020](images/ats2021.png)
+![ATS2020](images/ats-2021-banner.jpg)
 
 ![Dickson Lab](images/dickson_lab_logo.png)
 
