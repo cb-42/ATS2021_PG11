@@ -1,7 +1,7 @@
 ---
-title: 'PG11: Lung Microbiome Analysis Tutorial'
+title: 'PG11: A Crash Course in Microbiome Analysis'
 author: "Christopher A. Brown"
-date: "March 9, 2021 (updated)"
+date: "March 12, 2021 (updated)"
 output:
   html_document:
     code_folding: show
@@ -38,7 +38,7 @@ R Markdown documents consist of narrative of text such as this sentence and code
 # The first line without a # symbol is actual R code, and it will be executed when this code chunk is run.
 # To execute an entire code chunk: left click the green arrow in upper right of this section:
 # Alternatively, left click on the following line with R code, then use: cmd + enter (mac), ctrl + enter (pc). This will run a single line rather than the entire chunk.
-paste("Welcome to ATS 2021, PG11: A Hands-On Introduction to Studying the Lung Microbiome")
+paste("Welcome to ATS 2021, PG11: A Crash Course in Microbiome Analysis")
 ```
 
 ## 1.4 Brief notes on R code syntax, best practices  
@@ -61,7 +61,7 @@ Before we begin bringing in the data to begin our analysis, we need to load the 
 # This section contains typical libraries used in these analyses
 
 # I. universal data wrangling and visualization
-library(tidyverse)      # ggplot, dplyr, purrr, forcats, stringr... and other packages. See https://tidyverse.tidyverse.org/
+library(tidyverse)      # ggplot2, dplyr, purrr, forcats, stringr... and other packages. See https://tidyverse.tidyverse.org/
 
 # II. machine learning & analysis packages
 library(vegan)          # decostand(), metaMDS(), scores(), rda(), ordispider(), adonis()
@@ -980,9 +980,6 @@ ggplot(bc_tissue_vend_df, aes(x = vendor, y = Mean_BC, fill = vendor)) +
   expand_limits(y = c(0,1)) # Start y-axis at 0
 ```
 
-### Unifrac  
-Future example. [Descriptive text here]  
-
 # VII. Reporting  
 Usually it's not enough that you've generated statistics or created visualizations. You also need to be able to share these results. Fortunately, there are a variety of ways to do this.
 
@@ -1042,7 +1039,7 @@ Congratulations! You've made it to the end of this introduction to lung microbio
 Resources for learning more about various topics.  
 
 ## 8.1 Processing & Analysis Software  
-Although we used mothur to process the 16S data prior to this analysis, alternatives include QIIME2 and DADA2. Beyond processing, each also provides varying support for exploration and analysis tasks during or post-processing.  
+Although we used mothur to process the 16S data prior to this analysis, alternatives include QIIME2 and DADA2. Beyond data processing, each also provides varying support for exploration and analysis tasks during or post-processing.  
 
 [mothur](https://mothur.org/)  
 [QIIME2](https://qiime2.org/)  
@@ -1064,12 +1061,17 @@ This section contains some guides and further reading about R and key libraries 
 ## 8.3 Version control  
 If you're new to git/github and version control in general, there are a variety of resources to help get you started:  
 
-git  
+[resources for learning git](https://try.github.io/)  
 [github tutorial](https://guides.github.com/activities/hello-world/)  
 
-## 8.4 cbmbtools/course material  
+## 8.4 course material, Dickson Lab 16S SOP, cbmbtools  
+[ATS 2021 PG11 materials](https://github.com/cb-42/ATS2021_PG11)  
+    - This repository houses the code and data used for this tutorial.  
+[https://github.com/cb-42/Dickson_16S_SOP](https://github.com/cb-42/Dickson_16S_SOP)  
+    - This crash course is largely based on the Dickson Lab 16S Analysis SOP.  
 [cbmbtools library](https://github.com/cb-42/cbmbtools)  
-    - This package contains functions for assisting in 16S microbiome analysis.  
+    - This R package contains functions for assisting in 16S microbiome analysis and creating analysis pipelines.  
 
 ## 8.5 other  
 [Bioconductor](https://www.bioconductor.org/)  
+    - R tools for analyzing high-throughput genomic data.
