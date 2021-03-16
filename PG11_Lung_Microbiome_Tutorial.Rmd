@@ -1,7 +1,7 @@
 ---
 title: 'PG11: A Crash Course in Microbiome Analysis'
 author: "Christopher A. Brown"
-date: "March 12, 2021 (updated)"
+date: "March 16, 2021 (updated)"
 output:
   html_document:
     code_folding: show
@@ -394,62 +394,10 @@ biplot_results <- quiet_biplot(otu_lung_pca, type = "t")
 #  biplot(prcomp(otu_lung_hel), xlabs=ifelse(str_detect(lung_df$vendor, "Charles_River"), "CR", "JL")) # arrow.len = 0 will also remove warnings, at the cost of losing the arrowhead
 ```
 
-### 4.1.2 Trees and heat maps  
-Next we'll examine two approaches to constructing heat maps, using lung specimens.    
+### 4.1.2 Rank Abundance  
+In the following series of examples, we'll use RA plots to compare the community composition in lung specimens against negative controls. Note that the strategies we'll use can be extended to conduct comparisons across any arbitrary groups, assuming metadata exists to identify the observations (rows) belonging to each group. For instance, we might compare four different types of tissue, or drill down into the controls and compare those subtypes.  
 
-#### 4.1.2.a ggplot implementation  
-If you're comfortable with the ggplot approach to creating visualizations, you'll likely be able to more easily customize these plots to your liking.    
-
-```{r ggheatmap_prep}
-# Determine the order of OTUs based on means within Lung specimens
-otu_order <- names(sort(colMeans(otu_lung[, stringr::str_detect(colnames(otu_lung), "Otu")]), decreasing = TRUE))
-
-heat_df <- otu_lung %>% 
-  dplyr::select(specimen, log_IL1a, otu_order[1:20]) %>% # Select the top 20 OTUs
-  pivot_longer(cols = -c("specimen", "log_IL1a"), names_to = "OTU", values_to = "Percentage", # Pivots (longer) all columns expect those specified by -str_which()
-               names_ptypes = list(OTU = factor(levels = otu_order[1:20])))
-  # group_by(OTU) %>%
-  # summarize(Mean_perc = mean(Percentage), .groups = "drop") %>%
-```
-
-```{r ggheatmap, fig.height=8, fig.width=12}
-# Note that the OTU levels are sorted in reverse order of abundance here - we could adjust this if desired.
-ggplot(heat_df, aes(x = specimen, y = OTU)) +
-  geom_tile(aes(fill = Percentage)) + 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.margin = unit(c(0.5,0.5,0.5,1),"cm")) + # Extra plot padding is necessary due to the rotation of x-axis labels.
-  scale_fill_gradient(low = "white", high = "dark blue") + # This allows us to specify the colors used within the heatmap
-  labs(title = "Relative abundance of top OTUs by Specimen", x = "Lung Tissue Specimen")
-```
-
-#### 4.1.2.b Base implementation & dendrogram  
-Next, we'll explore a different approach using base R functionality. This time we'll use dissimilarity data and contruct dendrograms to go with the plot.  
-
-```{r dendro_heatmap, fig.height=8, fig.width=12}
-# Unfortunately, filtering and other tidyverse functions strip rownames, and rownames are useful for pulling information out of matrices.
-# However, there is a function to easily put the specimen column back into rownames
-heat_df <- dplyr::filter(otu_df, tissue_type == "Lung") %>%
-  droplevels() %>% 
-  remove_rownames() %>%
-  column_to_rownames("specimen") %>% # This turns the specimen column into the rownames.
-  dplyr::select(otu_order[1:20]) # Keep only the top 20 OTUs.
-
-# Create Bray-Curtis matrix for lung specimens
-bc_lung_spec <- vegdist(dplyr::select(heat_df, otu_order[1:20]), method = "bray")
-# The linkage method to be used will depend on the nature of the data
-clust_lung_spec <- hclust(bc_lung_spec, method = "average")
-
-# Create Bray-Curtis matrix for OTUs
-bc_lung_otu <- vegdist(t(dplyr::select(heat_df, otu_order[1:20])), method = "bray")
-clust_lung_otu <- hclust(bc_lung_otu, method = "average")
-
-# Create the heatmap with dendrograms
-heatmap(as.matrix(dplyr::select(heat_df, str_which(colnames(heat_df), "Otu"))), Rowv = as.dendrogram(clust_lung_spec), Colv = as.dendrogram(clust_lung_otu), margins=c(5,0))
-```
-
-### 4.1.3 Rank Abundance  
-In the following series of examples, we'll use RA plots to compare the community composition in lung speciments against negative controls. Note that the strategies we'll use can be extended to conduct comparisons across any arbitrary groups, assuming metadata exists to identify the observations (rows) belonging to each group. For instance, we might compare four different types of tissue, or drill down into the controls and compare those subtypes.  
-
-#### 4.1.3.a Comparison of Negative Controls against Lung Tisssue specimens  
+#### 4.1.2.a Comparison of Negative Controls against Lung Tisssue specimens  
 
 ```{r prep_ra}
 # First we need to prepare the data: negative controls and lung tissue specimens
@@ -561,7 +509,7 @@ ggplot(agg_df, aes(x = OTU, y = Mean_perc, fill = Phylum)) +
 # Encourage participants to run these by commenting out a layer, altering 1 parameter to develop a deeper understanding of how to build up or alter a ggplot object
 ```
 
-#### 4.1.3.b Comparison of Lung Tisssue specimens by vendor  
+#### 4.1.2.b Comparison of Lung Tisssue specimens by vendor  
 Next we'll create another relative abundance plot to examine lung tissue specimens by vendor.  
 
 ```{r prep_ra_lung}
@@ -613,7 +561,7 @@ This time, we'll create the final RA plot in one pass.
   labs(title="Comparison of Lung Tissue across vendors", subtitle = "Ranked by Charles River lung tissue specimens", y = "% Relative Abundance"))
 ```
 
-#### 4.1.3.c Stacked Bar examples  
+#### 4.1.2.c Stacked Bar examples  
 Stacked bars also us to view trends across samples, at the cost of potentially making it more difficult to clearly measure differences in OTUs. There are several strategies to consider when creating such a visualization. Sometimes, when there are many OTUS within a taxonomic level, it may be of interest to combine levels or combine groups of related OTUs to avoid hundreds of very small lines on the resulting bars. This improves the overall visual clarity, but there should be a compelling reason for performing the grouping operation. Additionally, just as in the Rank Abundance visualizations we've already seen, how categories (OTUs or otherwise) are ordered is an important component in clearly presenting one's results.  
 
 A basic example that requires no additional processing, can be constructed using Phylum, given that `g_df` already has this column thanks to our prior data preparation. The following visualization allows us to see broad trends and outliers in the relative abundance of various phyla across the samples.  
@@ -666,11 +614,14 @@ ggplot(g_df_redux, aes(x = mouse, y = Percentage, fill = fct_rev(OTU))) +
   scale_fill_manual(values = c("#A0A0A0", hue_pal()(20))) # Former is hexcode for a grey shade
 ```
 
+### 4.1.3 Trees and heat maps  
+See Supplemental (9.1) for two approaches of constructing heap maps using lung specimens to compare OTU relative abundances. 
+
 ## 4.2 Hypothesis testing  
 Next we'll explore how to conduct significance testing.  
 
 ### 4.2.1 PERMANOVA (adonis)  
-The following is an example of a permanova implementation using vegan::adonis().  
+The following is an example of a PERMANOVA implementation using `vegan::adonis()`.  
 
 ```{r adonis}
 # Permanova
@@ -1075,3 +1026,60 @@ If you're new to git/github and version control in general, there are a variety 
 ## 8.5 other  
 [Bioconductor](https://www.bioconductor.org/)  
     - R tools for analyzing high-throughput genomic data.
+
+# IX. Supplemental  
+These examples demonstrate additional data preparation, visualization, or modeling approaches that didn't fit into the main 90 minute walkthrough.  
+
+## 9.1 Comparing Community Composition  
+
+### 9.1.1 Heatmaps  
+Next we'll examine two approaches to constructing heat maps, using lung specimens.    
+
+#### 9.1.1.a ggplot implementation  
+If you're comfortable with the ggplot approach to creating visualizations, you'll likely be able to more easily customize these plots to your liking.    
+
+```{r ggheatmap_prep}
+# Determine the order of OTUs based on means within Lung specimens
+otu_order <- names(sort(colMeans(otu_lung[, stringr::str_detect(colnames(otu_lung), "Otu")]), decreasing = TRUE))
+
+heat_df <- otu_lung %>% 
+  dplyr::select(specimen, log_IL1a, otu_order[1:20]) %>% # Select the top 20 OTUs
+  pivot_longer(cols = -c("specimen", "log_IL1a"), names_to = "OTU", values_to = "Percentage", # Pivots (longer) all columns expect those specified by -str_which()
+               names_ptypes = list(OTU = factor(levels = otu_order[1:20])))
+  # group_by(OTU) %>%
+  # summarize(Mean_perc = mean(Percentage), .groups = "drop")
+```
+
+```{r ggheatmap, fig.height=8, fig.width=12}
+# Note that the OTU levels are sorted in reverse order of abundance here - we could adjust this if desired.
+ggplot(heat_df, aes(x = specimen, y = OTU)) +
+  geom_tile(aes(fill = Percentage)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.margin = unit(c(0.5,0.5,0.5,1),"cm")) + # Extra plot padding is necessary due to the rotation of x-axis labels.
+  scale_fill_gradient(low = "white", high = "dark blue") + # This allows us to specify the colors used within the heatmap
+  labs(title = "Relative abundance of top OTUs by Specimen", x = "Lung Tissue Specimen")
+```
+
+#### 9.1.1.b Base R implementation & dendrogram  
+Next, we'll explore a different approach using base R functionality. This time we'll use dissimilarity data and construct dendrograms to go with the plot.  
+
+```{r dendro_heatmap, fig.height=8, fig.width=12}
+# Unfortunately, filtering and other tidyverse functions strip rownames, and rownames are useful for pulling information out of matrices.
+# However, there is a function to easily put the specimen column back into rownames
+heat_df <- dplyr::filter(otu_df, tissue_type == "Lung") %>%
+  droplevels() %>% 
+  remove_rownames() %>%
+  column_to_rownames("specimen") %>% # This turns the specimen column into the rownames.
+  dplyr::select(otu_order[1:20]) # Keep only the top 20 OTUs.
+
+# Create Bray-Curtis matrix for lung specimens
+bc_lung_spec <- vegdist(dplyr::select(heat_df, otu_order[1:20]), method = "bray")
+# The linkage method to be used will depend on the nature of the data
+clust_lung_spec <- hclust(bc_lung_spec, method = "average")
+
+# Create Bray-Curtis matrix for OTUs
+bc_lung_otu <- vegdist(t(dplyr::select(heat_df, otu_order[1:20])), method = "bray")
+clust_lung_otu <- hclust(bc_lung_otu, method = "average")
+
+# Create the heatmap with dendrograms
+heatmap(as.matrix(dplyr::select(heat_df, str_which(colnames(heat_df), "Otu"))), Rowv = as.dendrogram(clust_lung_spec), Colv = as.dendrogram(clust_lung_otu), margins=c(5,0))
+```
