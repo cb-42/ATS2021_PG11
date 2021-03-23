@@ -1,7 +1,7 @@
 ---
 title: 'PG11: A Crash Course in Microbiome Analysis'
 author: "Christopher A. Brown"
-date: "March 16, 2021 (updated)"
+date: "March 23, 2021 (updated)"
 output:
   html_document:
     code_folding: show
@@ -258,7 +258,7 @@ rownames(con_lung_df) <- con_lung_df$specimen
 # PCA of all negative controls + lung tissue
 # Keep only the rows of interest for unstandardized data.
 pca_df <- otu_good[con_lung_df$specimen, ]
-otu_con_lung_hel <- decostand(pca_df, "hellinger") # Standardize use OTU columns only
+otu_con_lung_hel <- decostand(pca_df, "hellinger") # Standardize: use OTU columns only
 otu_con_lung_pca <- rda(otu_con_lung_hel)
 
 # summary() produces a list which is rather messy to print out all at once. Let's just examine the importance of the principal components by accessing $cont
@@ -449,7 +449,7 @@ Let's add an errorbar and improve the visual aesthetics.
 
 ```{r plot_ra_improved, fig.height=6, fig.width=12}
 # Add an errorbar
-(q <- p + geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3)))
+(q <- p + geom_errorbar(aes(ymin = Mean_perc - SEM, ymax = Mean_perc + SEM, width = 0.3))) 
 
 # Clear background + modify theme (rotate x-axis labels, reposition legend)
 (q <- q + theme_bw() + # note that a theme_ layer added after other other theme modifications will remove these prior modifications
@@ -631,9 +631,10 @@ adonis(otu_lung_hel~otu_lung$vendor, method="euclidean", permutations = 10000) #
 ```
 
 ### 4.2.2 mvabund  
-Because this may take some time to finish (about 4.5 minutes on a powerful machine), the following code is commented out to prevent it slowing down the creation of our report, which we'll get to later on. To run this section at a future point that's convenient for you, begin by simply highlighting all of the lines in the code chunk and then using CTRL + Shift + C to uncomment the code (mac). The code responsible for loading mvabund in section 2.1 will also need to be uncommented. [additional explanation, topics here]. For code chunks that take a while to execute, whether due to statistical analyses or visualizations, it may be beneficial to set the code chunk cache parameter to TRUE. This will enable you to recreate your report much more quickly when making small changes elsewhere.
+Because this may take some time to finish (about 4.5 minutes on a powerful machine), the following code is commented out to prevent it slowing down the creation of our report, which we'll get to later on. To run this section at a future point that's convenient for you, begin by simply highlighting all of the lines in the code chunk and then using CTRL + Shift + C to uncomment the code (mac). The code responsible for loading mvabund in section 2.1 will also need to be uncommented. For code chunks that take a while to execute, whether due to statistical analyses or visualizations, it may be beneficial to set the code chunk cache parameter to TRUE. This will enable you to recreate your report much more quickly when making small changes elsewhere.
 
 ```{r mvabund, cache=TRUE}
+# library(mvabund)
 # a <- Sys.time() # Sometimes this can take a while, so it might be useful to keep track of the time with start/stop points to allow us to compute the duration.
 # otu_mva <- mvabund(otu_lung[,str_which(colnames(otu_lung), "Otu")]) # select only lung specimens and Otu columns
 # otu_ven_many <- manyglm(otu_mva ~ otu_lung$vendor)
@@ -669,7 +670,7 @@ anova(cage_cca) # Analyze the model
 ```
 
 # V. Relative Abundance of Key Community Members  
-[Descriptive text here]  
+Next we'll further explore the influence of key OTUs as well as Families.     
 
 ## 5.1 Identifying enriched taxonomic groups  
 
@@ -684,11 +685,11 @@ While we could make use of our previous mvabund results and examine whether ther
 #   droplevels() %>%
 #   arrange(uni_p) # Orders the pvalues
 # 
-# # label OTUS
-# otu_ven_sigpvals$OTU <- fct_inorder(paste0(otu_good_taxonomy[levels(otu_ven_sigpvals$OTU), ]$Genus, " (", levels(otu_ven_sigpvals$OTU), ")"))
+# # label OTUS - Note that the OTU column is not a factor in this case
+# otu_ven_sigpvals$OTU <- fct_inorder(paste0(otu_good_taxonomy[otu_ven_sigpvals$OTU, ]$Genus, " (", otu_ven_sigpvals$OTU, ")"))
 ```
 
-Here is an example of formatting a dataframe (in this case containing pvalues) for display in a report.  
+Here is an example of formatting a dataframe (in this case containing pvalues) for display in a report. See Section VII for additional details related to reporting.  
 
 ```{r kable_mva_pvals, fig.height = 8, fig.width = 8}
 # Note that this is an example constructed for illustration purposes only
@@ -856,7 +857,7 @@ ggplot(rarefy_agg, aes(x = Sample_Seq_Num, y = Mean_Species, color = vendor)) +
   labs(x = "Number of Sequences Sampled", y = "Unique Species", title = "Rarefaction curves for lung specimens and negative controls")
 ```
 
-Relative abundance plots can also be used here.
+Relative abundance plots can also be used as a means of exploring α-diversity.
 
 ## 6.2 𝛽-diversity: across specimens  
 Next we'll examine diversity across specimens.    
