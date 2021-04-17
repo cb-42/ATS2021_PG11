@@ -37,6 +37,6 @@ This extracted directory includes all of the data and code needed for completing
 It would also be highly beneficial to be familiar with the basics of R programming prior beginning, though it is not required. A great resource is [R for Data Science](https://r4ds.had.co.nz/). Reading chapters 1 through 5 will familiarize you with the R design philosophy and syntax you'll see during the hands-on presentation.  
 
 ## V. Knit the Tutorial (optional: < 5 minutes)  
-Finally, the .Rmd filed included with these materials can be assembled into an HTML report by clicking the Knit button inside RStudio.  
+Finally, the .Rmd file included with these materials can be assembled into an HTML report by clicking the Knit button inside RStudio.  
 
 ![Knit](images/pg11_knit.png)

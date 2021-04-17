@@ -69,7 +69,7 @@ you’ll see during the hands-on presentation.
 
 ## V. Knit the Tutorial (optional: &lt; 5 minutes)
 
-Finally, the .Rmd filed included with these materials can be assembled
+Finally, the .Rmd file included with these materials can be assembled
 into an HTML report by clicking the Knit button inside RStudio.
 
 ![Knit](images/pg11_knit.png)
